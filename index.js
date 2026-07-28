@@ -1,5 +1,6 @@
 const express = require('express')
 const crypto = require("crypto")
+const cloudinary = require('cloudinary').v2;
 const app = express()
 app.use(express.json())
 const port = 8000.
@@ -9,6 +10,14 @@ const cors = require("cors")
 app.use(cors())
 dns.setServers(["8.8.8.8", "1.1.1.1"])
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+
+cloudinary.config({
+    cloud_name: process.env.CLOUD_NAME,
+    api_key: process.env.API_KEY,
+    api_secret: process.env.API_SECRET
+})
+
 app.get('/', (req, res) => {
     console.log("env:", process.env.MONGODB_USER)
     res.send('Hello World!', process.env.MONGODB_PASS);
@@ -28,7 +37,14 @@ const client = new MongoClient(uri, {
 const getProductId = () => {
     return "PRD-" + crypto.randomBytes(6).toString("base64url").replaceAll("_", "").replaceAll("-", "").slice(0, 6).toUpperCase()
 }
+// return { ...item, sku: data.productId + item.size + item.color.split("").slice(0, 3).join("").toUpperCase() }
+
+const getSku = (productId, productSize, productColor) => {
+    return productId + productSize + productColor.split('').slice(0, 3).join("").toUpperCase()
+}
 console.log(getProductId())
+console.log(getSku(getProductId(), "XL", "Purple"))
+
 
 async function run() {
     try {
@@ -40,10 +56,15 @@ async function run() {
 
         // category-----------------------------------------------------------------------------------------------
 
+        app.get("/category/:id", async (req, res) => {
+            const { id } = req.params
+            const query = { _id: new ObjectId(id) }
+            const result = await categoriesCollection.findOne(query)
+            res.send(result)
+        })
+
         app.get("/categories", async (req, res) => {
-
             const result = await categoriesCollection.find().toArray()
-
             res.send(result)
         })
 
@@ -90,10 +111,41 @@ async function run() {
             res.send(namesInObject)
         })
         // products api _____________________________________________________________________________
-        app.get("/products", async (req, res) => {
+        app.get("/product/:id", async (req, res) => {
+            const { id } = req.params
+            const query = { _id: new ObjectId(id) }
+            const result = await productsCollection.findOne(query)
+            res.send(result)
+        })
 
-            const namesInObject = await productsCollection.find().toArray()
-            res.send(namesInObject)
+        app.get("/products/:categoryId", async (req, res) => {
+            const categoryId = req.params
+            const result = await productsCollection.find(categoryId).toArray()
+            res.send(result)
+        })
+
+
+
+        app.get("/products", async (req, res) => {
+            const result = await productsCollection.find().toArray()
+            res.send(result)
+        })
+
+        app.patch('/product/:id', async (req, res) => {
+            const { id } = req.params
+            const query = { _id: new ObjectId(id) }
+            const {formData:data, publicIdsToDelete} = req.body
+            data.variants = data.variants.map(variant => {
+                if (variant.sku.trim() === "") {
+                    return { ...variant, sku: getSku(data.productId, variant.size, variant.color) }
+                }
+                return variant
+            })
+            data.updatedAt = new Date()
+            console.log(data, publicIdsToDelete)
+            // const result = await productsCollection.updateOne(query, { $set: data })
+            // res.send(result)
+
         })
 
         app.post("/product", async (req, res) => {
@@ -115,6 +167,28 @@ async function run() {
                 }
                 return res.send(error)
             }
+        })
+
+        app.delete("/product/:id", async (req, res) => {
+            try {
+                const { id } = req.params
+                const query = { _id: new ObjectId(id) }
+
+                const product = await productsCollection.findOne(query)
+                if (!product) {
+                    res.status(404).send({ message: "No Product Found" })
+                }
+
+                for (let image of product.images) {
+                    await cloudinary.uploader.destroy(image.publicId)
+
+                }
+                const result = await productsCollection.deleteOne(query)
+                res.send(result)
+            } catch (error) {
+                res.status(error.status || 500).send(error.message || "Server Error")
+            }
+
         })
     } finally {
 
