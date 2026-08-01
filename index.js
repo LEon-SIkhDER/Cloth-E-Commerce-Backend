@@ -143,9 +143,11 @@ async function run() {
             })
             data.updatedAt = new Date()
             console.log(data, publicIdsToDelete)
-            // const result = await productsCollection.updateOne(query, { $set: data })
-            // res.send(result)
-
+            const result = await productsCollection.updateOne(query, { $set: data })
+            for(let publicId of publicIdsToDelete){
+                await cloudinary.uploader.destroy(publicId)
+            }
+            res.send(result)
         })
 
         app.post("/product", async (req, res) => {
@@ -181,7 +183,6 @@ async function run() {
 
                 for (let image of product.images) {
                     await cloudinary.uploader.destroy(image.publicId)
-
                 }
                 const result = await productsCollection.deleteOne(query)
                 res.send(result)
