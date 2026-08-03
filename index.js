@@ -134,7 +134,7 @@ async function run() {
         app.patch('/product/:id', async (req, res) => {
             const { id } = req.params
             const query = { _id: new ObjectId(id) }
-            const {formData:data, publicIdsToDelete} = req.body
+            const { formData: data, publicIdsToDelete } = req.body
             data.variants = data.variants.map(variant => {
                 if (variant.sku.trim() === "") {
                     return { ...variant, sku: getSku(data.productId, variant.size, variant.color) }
@@ -144,11 +144,23 @@ async function run() {
             data.updatedAt = new Date()
             console.log(data, publicIdsToDelete)
             const result = await productsCollection.updateOne(query, { $set: data })
-            for(let publicId of publicIdsToDelete){
+            for (let publicId of publicIdsToDelete) {
                 await cloudinary.uploader.destroy(publicId)
             }
             res.send(result)
         })
+        // status update
+
+        app.patch("/product/:id/status", async (req, res) => {
+            const { id } = req.params
+            const query = { _id: new ObjectId(id) }
+            const { newStatus } = req.body
+            const update = { $set: { status: newStatus } }
+            console.log(query, update)
+            const result = await productsCollection.updateOne(query, update)
+            res.send(result)
+        })
+
 
         app.post("/product", async (req, res) => {
             const data = req.body
@@ -175,12 +187,10 @@ async function run() {
             try {
                 const { id } = req.params
                 const query = { _id: new ObjectId(id) }
-
                 const product = await productsCollection.findOne(query)
                 if (!product) {
                     res.status(404).send({ message: "No Product Found" })
                 }
-
                 for (let image of product.images) {
                     await cloudinary.uploader.destroy(image.publicId)
                 }
@@ -189,7 +199,6 @@ async function run() {
             } catch (error) {
                 res.status(error.status || 500).send(error.message || "Server Error")
             }
-
         })
     } finally {
 
