@@ -1,6 +1,7 @@
 const express = require('express')
 const crypto = require("crypto")
 const cloudinary = require('cloudinary').v2;
+const cron = require('node-cron')
 const app = express()
 app.use(express.json())
 const port = 8000.
@@ -52,7 +53,9 @@ async function run() {
         const db = client.db("Cloth_E_Commerce")
         const categoriesCollection = db.collection("Categories")
         const productsCollection = db.collection("Products")
+        const failedImagesDeletion = db.collection("FailedImagesDeletion")
         await productsCollection.createIndex({ productId: 1 }, { unique: true })
+
 
         // category-----------------------------------------------------------------------------------------------
 
@@ -68,7 +71,7 @@ async function run() {
             res.send(result)
         })
 
-        app.patch("/category", async (req, res) => {
+        app.patch("/category/status", async (req, res) => {
             const { id, isActive } = req.body
             // console.log(id, isActive)
             const query = { _id: new ObjectId(id) }
@@ -78,6 +81,33 @@ async function run() {
                 update = { $set: { isActive: isActive, updatedAt: new Date() } }
             }
             // console.log("hello:------------",update)
+            const result = await categoriesCollection.updateOne(query, update)
+            res.send(result)
+        })
+
+        app.patch("/category/:id", async (req, res) => {
+            // console.log("working")
+            const { id } = req.params
+            const { formData, publicIdToDelete } = req.body
+
+            const query = { _id: new ObjectId(id) }
+            const update = { $set: formData }
+            if (publicIdToDelete) {
+                try {
+                    await cloudinary.uploader.destroy(publicIdToDelete)
+                } catch (error) {
+                    const insert = {
+                        publicId: publicIdToDelete,
+                        attempt: 1,
+                        firstAttempt: new Date(),
+                        error
+                    }
+                    console.log(insert)
+                    failedImagesDeletion.insertOne(insert)
+                }
+            }
+            // console.log(query, update)
+
             const result = await categoriesCollection.updateOne(query, update)
             res.send(result)
         })
@@ -200,6 +230,35 @@ async function run() {
                 res.status(error.status || 500).send(error.message || "Server Error")
             }
         })
+
+        // special fn 
+        const retryDeletionImage = async () => {
+            const jobs = await failedImagesDeletion.find().toArray()
+            if (jobs.length === 0) {
+                console.log("No image to delete")
+            }
+            for (let job of jobs) {
+                try {
+                    await cloudinary.uploader.destroy(job.publicId)
+                    await failedImagesDeletion.deleteOne({ publicId: job.publicId })
+                    console.log(job.publicId + " deleted")
+                } catch (error) {
+                    const query = { publicId: job.publicId }
+                    const update = {
+                        $set: {
+                            lastAttempt: new Date(),
+                            error
+                        },
+                        $inc: { attempt: 1 }
+                    }
+                    console.log(query, update, error)
+                    await failedImagesDeletion.updateOne(query, update)
+                }
+            }
+        }
+
+        cron.schedule(" * * * * * ", retryDeletionImage)
+
     } finally {
 
     }
