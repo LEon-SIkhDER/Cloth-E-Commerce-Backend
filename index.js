@@ -175,7 +175,17 @@ async function run() {
             console.log(data, publicIdsToDelete)
             const result = await productsCollection.updateOne(query, { $set: data })
             for (let publicId of publicIdsToDelete) {
-                await cloudinary.uploader.destroy(publicId)
+                try {
+                    await cloudinary.uploader.destroy(publicId)
+                } catch (error) {
+                    const insert = {
+                        publicId,
+                        attempt: 1,
+                        lastAttempt: new Date(),
+                        error
+                    }
+                    failedImagesDeletion.insertOne(insert)
+                }
             }
             res.send(result)
         })
@@ -222,7 +232,17 @@ async function run() {
                     res.status(404).send({ message: "No Product Found" })
                 }
                 for (let image of product.images) {
-                    await cloudinary.uploader.destroy(image.publicId)
+                    try {
+                        await cloudinary.uploader.destroy(image.publicId)
+                    } catch (error) {
+                        const insert = {
+                            publicId: image.publicId,
+                            attempt: 1,
+                            lastAttempt: new Date(),
+                            error
+                        }
+                        failedImagesDeletion.insertOne(insert)
+                    }
                 }
                 const result = await productsCollection.deleteOne(query)
                 res.send(result)
@@ -257,7 +277,7 @@ async function run() {
             }
         }
 
-        cron.schedule(" * * * * * ", retryDeletionImage)
+        cron.schedule(" 0 4 * * * ", retryDeletionImage)
 
     } finally {
 
